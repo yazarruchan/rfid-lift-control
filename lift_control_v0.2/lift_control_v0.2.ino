@@ -6,13 +6,15 @@
 * v0.2:
 * - added functions of buzzer, led, relay
 * - discarded rfid UID delete function (erase mode). 
-*   In future will be add smart deleting fuction.
+* In future will be add smart deleting fuction.
 * - made some code arrangement
 * - made simpleDef.h header file.
 * - normalModeOn name changed to idleMode.
+* - Corrected RGB LED pin numbers
+* - Added some led animation
 * - 
 * ++ Yapilacaklar
-* + Led arayuzunu olustur
+* + Led arayuzunu olustur --%15--
 * + buzzer ve relay ayarlarini duzenle
 * + sisteme ne gibi esneklik katilabilir
 */
@@ -37,14 +39,14 @@
 #define SS_PIN 10
 #define RST_PIN 9
 /*---------------------------------------------------------------*/
-#define LED_R 3
+#define LED_R 6
 #define LED_G 5
-#define LED_B 6
+#define LED_B 3
 /*---------------------------------------------------------------*/
 MFRC522 rfid(SS_PIN, RST_PIN); // Instance of the class
 //MFRC522::MIFARE_Key key;
 /*---------------------------------------------------------------*/
-u64 lastReadTime;
+u32 lastReadTime;
 u8 successRead; // Variable integer to keep if we have Successful Read from Reader
 byte storedCard[4]; // Stores an ID read from EEPROM
 byte readCard[4];   // Stores scanned ID read from RFID Module
@@ -52,8 +54,9 @@ byte lastReadCard[4]; //Store previous scanned ID read from RFID Module
 byte masterCard[4]={183, 70, 146, 53}; // Stores master card's ID read from EEPROM
 //mastercard UID: B7 46 92 35 - 183 70 146 53
 /*---------------------------------------------------------------*/
+bool BUZZER_UP = true;
 bool programMode = false;  // initialize programming mode to programMode
-bool eraseMode = false;    // initialize programming mode to register
+bool eraseMode = false;    // initialize programming mode to erase mode
 /*---------------------------------------------------------------*/
 void setup() {
   initLed();
@@ -85,7 +88,7 @@ void loop() {
   do {
     successRead = getID();  // sets successRead to 1 when we get read from reader otherwise 0
     if (programMode) {
-      //cycleLeds();              // Program Mode cycles through Red Green Blue waiting to read a new card
+      ledMagenta();              // Program Mode light Magenta waiting to read a new card
     }
     else {
       idleMode();     // Normal mode, blue Power LED is on, all others are off
@@ -100,6 +103,7 @@ void loop() {
       //Serial.println(F("Kayit silmek icin lütfen kayitli bir kart okutun"));
       //Serial.println(F("-----------------------------"));
       //eraseMode = true;
+      programMode = false;
       Serial.println(F("Program moddan cikiliyor!"));
       return;
      }
@@ -108,7 +112,8 @@ void loop() {
      */
     eraseMode = false;
     if ( eraseMode ) { // If eraseMode true delete it
-      if(isMaster(readCard)){
+     /* 
+      *  if(isMaster(readCard)){
         Serial.print("Master kart silinemez!");
       }
       else{
@@ -127,19 +132,28 @@ void loop() {
       eraseMode = false;
       programMode = false;
       return;
+      */
     }/*Bu kısma kadar*/
     else {                    // If scanned card is not known add it
       if(findID(readCard)){
         Serial.println(F("Kart daha onceden kaydedilmis."));
+        buzzerOn();
+        ledRgb(150, 0, 0,500);
+        buzzerOff();
       }
       else{
         Serial.println(F("This PICC UID not exist, registering..."));
         writeID(readCard);
         Serial.println(F("Kart basariyla kaydedildi."));
+        buzzerOn();
+        ledRgb(0,150,0,500);
+        buzzerOff();
       }
+      /*
       Serial.println(F("Kayit modundan cikiliyor."));
       Serial.println(F("-----------------------------"));
-      programMode = false;
+      programMode = false; //if we want exit prog mode after added id
+      */
     }  
   }
   else {
@@ -154,11 +168,12 @@ void loop() {
       Serial.println(F("Kayit edilecek karti okutun."));
       //Serial.println(F("Kayitli karti silmek icin Masterkarti tekrar okutun."));
       Serial.println(F("-----------------------------"));
+      cycleLed(500);
     }
     else {
       if ( findID(readCard) ) { // If not, see if the card is in the EEPROM
         Serial.println(F("Gecis Onaylandi"));
-        granted(3000);         // Open the door lock for 3000 ms
+        granted(1000);         // Open the door lock for 3000 ms
         Serial.println(F("-----------------------------"));
       }
       else {      // If not, show that the ID was not valid
@@ -192,7 +207,16 @@ void ShowReaderDetails() {
 /*    digitalWrite(greenLed, LED_OFF);  // Make sure green LED is off
     digitalWrite(blueLed, LED_OFF);   // Make sure blue LED is off
     digitalWrite(redLed, LED_ON);   // Turn on red LED
-*/    while (true); // do not go further
+*/    while (true){ // do not go further
+        u16 interval = 500;
+        u16 timeVal = millis()%interval;
+        if(timeVal > 0 && timeVal < 10){
+          ledRed();
+        }
+        else if(timeVal > (interval/2)-10 && timeVal < (interval/2)+10){
+          ledRgbOff();
+        }
+      }
   }
 }
 
@@ -216,7 +240,7 @@ u8 getID() {
   }
   rfid.PICC_HaltA(); // Stop reading
   Serial.println("");
-  if(isSame() && millis()-lastReadTime < 3000){
+  if(isSame() && millis()-lastReadTime < 1500){
     Serial.println("Ardarda cok fazla okutma yapildi");
     return 0;
   }
@@ -228,8 +252,9 @@ u8 getID() {
 
 //////////////////////////////////////// idle mode  ///////////////////////////////////
 void idleMode() {/*aka normalModeOn*/
-  //Serial.println("Normal Mode");
+  //Serial.println("Idle Mode");
   relayOff();// Make sure Door is Locked
+  ledBlue();
 }
 
 //////////////////////////////////////// Read an ID from EEPROM //////////////////////////////
@@ -339,15 +364,15 @@ void granted ( u32 interval) {
   relayOn();
   buzzerOn();
   ledRgb(0,255,0);
+  if(interval < 500){
+    interval = 500;
+  }
   startTime = millis();
   do {
     if(millis()-startTime > 140 && millis()-startTime < 160){
-      buzzerOff();
+      //buzzerOff();
     }
     if(millis()-startTime > 290 && millis()-startTime < 310){
-      buzzerOn();
-    }
-    if(millis()-startTime > 440 && millis()-startTime < 460){
       buzzerOff();
     }
   }
@@ -364,27 +389,31 @@ void denied() {
   u64 startTime;
   buzzerOn();
   relayOff();
-  ledRgb(255,0,0);
+  ledRgb(250,0,0);
   startTime = millis();
   do {
-    if(millis()-startTime > 140 && millis()-startTime < 160){
+    if(millis()-startTime > 140 && millis()-startTime < 160){//150
       buzzerOff();
+      ledRgbOff();
     }
-    if(millis()-startTime > 290 && millis()-startTime < 310){
+    if(millis()-startTime > 290 && millis()-startTime < 310){//300
       buzzerOn();
+      ledRgb(250,0,0);
     }
-    if(millis()-startTime > 440 && millis()-startTime < 460){
+    if(millis()-startTime > 440 && millis()-startTime < 460){//450
       buzzerOff();
+      ledRgbOff();
     }
-    if(millis()-startTime > 590 && millis()-startTime < 610){
+    if(millis()-startTime > 590 && millis()-startTime < 610){//600
+      buzzerOn();
+      ledRgb(250,0,0);
+    }
+    if(millis()-startTime > 740 && millis()-startTime < 760){//750
       buzzerOff();
+      ledRgbOff();
     }
   }
-  while((millis()-startTime) < 2000);
-  if(buzzerState()){
-    buzzerOff();
-  }
-  ledRgbOff();
+  while((millis()-startTime) < 770);
 }
 /////////////////////   Init Led    /////////////////////////////
 void initLed(){
@@ -397,32 +426,64 @@ void initLed(){
 }
 /////////////////////   RGB Led    //////////////////////////////
 void ledRgb(uint8_t ledR, uint8_t ledG, uint8_t ledB){
-  digitalWrite(LED_R, ledR);
-  digitalWrite(LED_G, ledG);
-  digitalWrite(LED_B, ledB);
+  analogWrite(LED_R, ledR);
+  analogWrite(LED_G, ledG);
+  analogWrite(LED_B, ledB);
 }
 /*
-  ledRGB(255, 0, 0); // Red
-  ledRGB(0, 255, 0); // Green
-  ledRGB(0, 0, 255); // Blue
-  ledRGB(255, 255, 125); // Raspberry
-  ledRGB(0, 255, 255); // Cyan
-  ledRGB(255, 0, 255); // Magenta
-  ledRGB(255, 255, 0); // Yellow
-  ledRGB(255, 255, 255); // White
-*/
-///////////////////// All Red Off ////////////////////////////
-void ledRgbOff(){
-  digitalWrite(LED_R, LOW);
-  digitalWrite(LED_G, LOW);
-  digitalWrite(LED_B, LOW);  
-}
-
-/////////////////////  Cycle Led  ////////////////////////////
-void cycleLed(){
   ledRgb(255, 0, 0); // Red
   ledRgb(0, 255, 0); // Green
   ledRgb(0, 0, 255); // Blue
+  ledRgb(255, 255, 125); // Raspberry
+  ledRgb(0, 255, 255); // Cyan
+  ledRgb(255, 0, 255); // Magenta
+  ledRgb(255, 255, 0); // Yellow
+  ledRgb(255, 255, 255); // White
+*/
+
+void ledRgb(u8 ledR, u8 ledG, u8 ledB, u32 waitTime){
+  u32 startTime = millis();
+  do{
+    analogWrite(LED_R, ledR);
+    analogWrite(LED_G, ledG);
+    analogWrite(LED_B, ledB);
+  }
+  while(millis() - startTime < waitTime);
+}
+
+/////////////////////  Led Color  ////////////////////////////
+void ledRed(){
+  ledRgb(200, 0, 0); // Red
+}
+
+void ledGreen(){
+  ledRgb(0, 200, 0); // Green
+}
+
+void ledBlue(){
+  ledRgb(0, 0, 200); // Blue
+}
+
+void ledMagenta(){
+  ledRgb(75, 0, 230); // Magenta
+}
+///////////////////// All Red Off ////////////////////////////
+void ledRgbOff(){
+  ledRgb(0, 0, 0);
+}
+
+/////////////////////  Cycle Led  ////////////////////////////
+void cycleLed(u16 interval){
+  u32 startTime = millis();
+  do{
+    if(millis()-startTime < 10){
+      ledRgb(0, 255, 0); // Green 
+    }
+    else if(millis()-startTime >( interval/2)-10 && millis()-startTime < (interval/2)+10){
+      ledRgb(255, 0, 0); // Red
+    }
+  }
+  while(millis()-startTime < interval);
 }
 /////////////////////  Init Buzzer  /////////////////////////////
 void initBuzzer(){
@@ -431,6 +492,7 @@ void initBuzzer(){
 }
 
 void buzzerOn(){
+  if(BUZZER_UP)
   digitalWrite(BUZZER_PIN, HIGH);
 }
 
@@ -456,4 +518,8 @@ void relayOn(){
 
 void relayOff(){
   digitalWrite(RELAY_PIN, HIGH);
+}
+
+bool relayStatus(){
+  return digitalRead(RELAY_PIN);
 }
