@@ -1,3 +1,4 @@
+
 /*
 * Change Log
 * v0.1:
@@ -7,22 +8,40 @@
 * - added functions of buzzer, led, relay
 * - discarded rfid UID delete function (erase mode). 
 * In future will be add smart deleting fuction.
+* 
+* v0.2.1
 * - made some code arrangement
 * - made simpleDef.h header file.
 * - normalModeOn name changed to idleMode.
 * - Corrected RGB LED pin numbers
-* - Added some led animation
-* - 
+* - Added some led and buzzer animation:
+*   - Authorized card animation
+*   - Unauthorized card animation
+*   - Program mode animation
+*   - Idle mode animation
+*   - RFID reader error animation
 * ++ Yapilacaklar
-* + Led arayuzunu olustur --%15--
+* + Led arayuzunu olustur --%65--
 * + buzzer ve relay ayarlarini duzenle
 * + sisteme ne gibi esneklik katilabilir
+* 
+* V0.3.0
+* - added external EEPROM functions and libraries
+* - revise eeprom functions
+* - rezerve edilen adres sayısı baştan 12'ye çıkarıldı.
+* - bir kartı iki defa kayıt etmekte düzeltilecek.
 */
 
 #include "simpleDef.h"
 #include <SPI.h>
 #include <MFRC522.h>
 #include <EEPROM.h>     // We are going to read and write PICC's UIDs from/to EEPROM
+#include <Wire.h>
+
+/*---------------------------------------------------------------*/
+#define EXT_EEPROM 1
+//#define ADDR_Ax 0b000 //A2, A1, A0
+#define ADDR 0x50//(0b1010 << 3) + ADDR_Ax
 /*---------------------------------------------------------------*/
 #define BUZZER_PIN 8
 /*---------------------------------------------------------------*/
@@ -59,20 +78,21 @@ bool programMode = false;  // initialize programming mode to programMode
 bool eraseMode = false;    // initialize programming mode to erase mode
 /*---------------------------------------------------------------*/
 void setup() {
+  initEeprom();
   initLed();
   initBuzzer();
   initRelay();
   Serial.begin(9600);
   SPI.begin(); // Init SPI bus
   rfid.PCD_Init(); // Init MFRC522
-  Serial.println("Asansor Kat Kontrol v0.2");
+  Serial.println("Asansor Kat Kontrol v0.3");
   ShowReaderDetails();
   /*WipeMode not necessary now*/
   /*Mastercard not store eeprom now, hardcoded in program */
   Serial.println(F("-------------------"));
   Serial.println(F("MasterCard's UID"));
   for ( uint8_t i = 0; i < 4; i++ ) {          // Read Master Card's UID from EEPROM
-    //masterCard[i] = EEPROM.read(2 + i);    // Write it to masterCard[]
+    //masterCard[i] = readEeprom(2 + i);    // Write it to masterCard[]
     Serial.print(masterCard[i], HEX);
   }
   /*End of init sequence*/
@@ -138,7 +158,7 @@ void loop() {
       if(findID(readCard)){
         Serial.println(F("Kart daha onceden kaydedilmis."));
         buzzerOn();
-        ledRgb(150, 0, 0,500);
+        ledRgbW(150, 0, 0,500);
         buzzerOff();
       }
       else{
@@ -146,7 +166,7 @@ void loop() {
         writeID(readCard);
         Serial.println(F("Kart basariyla kaydedildi."));
         buzzerOn();
-        ledRgb(0,150,0,500);
+        ledRgbW(0,150,0,500);
         buzzerOff();
       }
       /*
@@ -160,7 +180,7 @@ void loop() {
     if ( isMaster(readCard)) {    // If scanned card's ID matches Master Card's ID - enter program mode
       programMode = true;
       Serial.println(F("Masterkart okutuldu - Program Modu aktif"));
-      u8 count = EEPROM.read(0);   // Read the first Byte of EEPROM that
+      u8 count = readEeprom(0);   // Read the first Byte of EEPROM that
       Serial.print(F("Hafizada kayitli "));     // stores the number of ID's in EEPROM
       Serial.print(count);
       Serial.print(F(" adet kart var."));
@@ -173,7 +193,7 @@ void loop() {
     else {
       if ( findID(readCard) ) { // If not, see if the card is in the EEPROM
         Serial.println(F("Gecis Onaylandi"));
-        granted(1000);         // Open the door lock for 3000 ms
+        granted(3000);         // Open the door lock for 3000 ms
         Serial.println(F("-----------------------------"));
       }
       else {      // If not, show that the ID was not valid
@@ -254,26 +274,67 @@ u8 getID() {
 void idleMode() {/*aka normalModeOn*/
   //Serial.println("Idle Mode");
   relayOff();// Make sure Door is Locked
+  //ledBlue();
   ledBlue();
+}
+
+//////////////////////////////////////// EEPROM /////////////////////////////////////
+void initEeprom(){
+  if(EXT_EEPROM){
+    Wire.begin();
+    }
+    
+}
+
+void writeEeprom(u8 address, u8 data){
+  if(EXT_EEPROM){
+    Wire.beginTransmission(ADDR);
+    Wire.write(address);
+    Wire.write(data);
+    Wire.endTransmission();
+    delay(1);
+  }
+  else if(!EXT_EEPROM){
+  EEPROM.write(address, data);
+  }
+ 
+}
+
+u8 readEeprom(u8 address){
+  u8 data = NULL;
+  if(EXT_EEPROM){
+    Wire.beginTransmission(ADDR);
+    Wire.write(address);
+    Wire.endTransmission();
+    Wire.requestFrom(ADDR,1); //retrive 1 returned byte
+    delay(1);
+    if(Wire.available()){
+      data = Wire.read();
+    }
+  }
+  else if(!EXT_EEPROM){
+    data = EEPROM.read(address);
+  }
+  return data;
 }
 
 //////////////////////////////////////// Read an ID from EEPROM //////////////////////////////
 void readID( u8 number ) {
-  u8 start = (number * 4 ) + 2;    // Figure out starting position
+  u8 start = (number * 4 ) + 12;    // Figure out starting position - ilk 12 adres kart sayısı için rezerve edilmiştir.
   for ( u8 i = 0; i < 4; i++ ) {     // Loop 4 times to get the 4 Bytes
-    storedCard[i] = EEPROM.read(start + i);   // Assign values read from EEPROM to array
+    storedCard[i] = readEeprom(start + i);   // Assign values read from EEPROM to array
   }
 }
 
 ///////////////////////////////////////// Add ID to EEPROM   ///////////////////////////////////
 void writeID( byte a[] ) {
   if ( !findID( a ) ) {     // Before we write to the EEPROM, check to see if we have seen this card before!
-    u8 num = EEPROM.read(0);     // Get the numer of used spaces, position 0 stores the number of ID cards
-    u8 start = ( num * 4 ) + 6;  // Figure out where the next slot starts
+    u8 num = readEeprom(0);     // Get the numer of used spaces, position 0 stores the number of ID cards
+    u8 start = ( num * 4 ) + 12;  // Figure out where the next slot starts - ilk 12 adres kart sayısı için rezerve edilmiştir.
     num++;                // Increment the counter by one
-    EEPROM.write( 0, num );     // Write the new count to the counter
+    writeEeprom( 0, num );     // Write the new count to the counter
     for ( u8 j = 0; j < 4; j++ ) {   // Loop 4 times
-      EEPROM.write( start + j, a[j] );  // Write the array values to EEPROM in the right position
+      writeEeprom( start + j, a[j] );  // Write the array values to EEPROM in the right position
     }
     //successWrite();
     Serial.println(F("Succesfully added ID record to EEPROM"));
@@ -291,22 +352,22 @@ void deleteID( byte a[] ) {
     Serial.println(F("Failed! There is something wrong with ID or bad EEPROM"));
   }
   else {
-    u8 num = EEPROM.read(0);   // Get the numer of used spaces, position 0 stores the number of ID cards
+    u8 num = readEeprom(0);   // Get the numer of used spaces, position 0 stores the number of ID cards
     u8 slot;       // Figure out the slot number of the card
     u8 start;      // = ( num * 4 ) + 6; // Figure out where the next slot starts
     u8 looping;    // The number of times the loop repeats
     u8 j;
-    u8 count = EEPROM.read(0); // Read the first Byte of EEPROM that stores number of cards
+    u8 count = readEeprom(0); // Read the first Byte of EEPROM that stores number of cards
     slot = findIDSLOT( a );   // Figure out the slot number of the card to delete
     start = (slot * 4) + 2;
     looping = ((num - slot) * 4);
     num--;      // Decrement the counter by one
-    EEPROM.write( 0, num );   // Write the new count to the counter
+    writeEeprom( 0, num );   // Write the new count to the counter
     for ( j = 0; j < looping; j++ ) {         // Loop the card shift times
-      EEPROM.write( start + j, EEPROM.read(start + 4 + j));   // Shift the array values to 4 places earlier in the EEPROM
+      writeEeprom( start + j, readEeprom(start + 4 + j));   // Shift the array values to 4 places earlier in the EEPROM
     }
     for ( u8 k = 0; k < 4; k++ ) {         // Shifting loop
-      EEPROM.write( start + j + k, 0);
+      writeEeprom( start + j + k, 0);
     }
     //successDelete();
     Serial.println(F("Succesfully removed ID record from EEPROM"));
@@ -325,7 +386,7 @@ bool checkTwo ( byte a[], byte b[] ) {
 
 //////////////////////////////////////// Find Slot   ///////////////////////////////////
 u8 findIDSLOT( byte find[] ) {
-  u8 count = EEPROM.read(0);       // Read the first Byte of EEPROM that
+  u8 count = readEeprom(0);       // Read the first Byte of EEPROM that
   for ( u8 i = 1; i <= count; i++ ) {    // Loop once for each EEPROM entry
     readID(i);                // Read an ID from EEPROM, it is stored in storedCard[4]
     if ( checkTwo( find, storedCard ) ) {   // Check to see if the storedCard read from EEPROM
@@ -337,7 +398,7 @@ u8 findIDSLOT( byte find[] ) {
 
 ///////////////////////////////////////// Find ID From EEPROM   ///////////////////////////////////
 bool findID( byte find[] ) {
-  u8 count = EEPROM.read(0);     // Read the first Byte of EEPROM that
+  u8 count = readEeprom(0);     // Read the first Byte of EEPROM that
   for ( u8 i = 1; i < count; i++ ) {    // Loop once for each EEPROM entry
     readID(i);          // Read an ID from EEPROM, it is stored in storedCard[4]
     if ( checkTwo( find, storedCard ) ) {   // Check to see if the storedCard read from EEPROM
@@ -441,7 +502,7 @@ void ledRgb(uint8_t ledR, uint8_t ledG, uint8_t ledB){
   ledRgb(255, 255, 255); // White
 */
 
-void ledRgb(u8 ledR, u8 ledG, u8 ledB, u32 waitTime){
+void ledRgbW(u8 ledR, u8 ledG, u8 ledB, u32 waitTime){
   u32 startTime = millis();
   do{
     analogWrite(LED_R, ledR);
@@ -453,15 +514,15 @@ void ledRgb(u8 ledR, u8 ledG, u8 ledB, u32 waitTime){
 
 /////////////////////  Led Color  ////////////////////////////
 void ledRed(){
-  ledRgb(200, 0, 0); // Red
+  ledRgb(250, 0, 0); // Red
 }
 
 void ledGreen(){
-  ledRgb(0, 200, 0); // Green
+  ledRgb(0, 250, 0); // Green
 }
 
 void ledBlue(){
-  ledRgb(0, 0, 200); // Blue
+  ledRgb(0, 0, 250); // Blue
 }
 
 void ledMagenta(){
@@ -504,20 +565,20 @@ bool buzzerState(){
    if (digitalRead(BUZZER_PIN)){
     return true;
    }
-   return false;
+   return false;                                                                                                                                                                                                                                                                                                                                                                                                           
 }
 /////////////////////  Init Relay   /////////////////////////////
 void initRelay(){
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, HIGH);
-}
-
-void relayOn(){
   digitalWrite(RELAY_PIN, LOW);
 }
 
-void relayOff(){
+void relayOn(){
   digitalWrite(RELAY_PIN, HIGH);
+}
+
+void relayOff(){
+  digitalWrite(RELAY_PIN, LOW);
 }
 
 bool relayStatus(){
