@@ -32,12 +32,15 @@
 * - bir kartı iki defa kayıt etmekte düzeltilecek.
 */
 
-#include "simpleDef.h"
 #include <SPI.h>
 #include <MFRC522.h>
 #include <EEPROM.h>     // We are going to read and write PICC's UIDs from/to EEPROM
 #include <Wire.h>
-
+/*---------------------------------------------------------------*/
+typedef uint8_t u8;
+//typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 /*---------------------------------------------------------------*/
 #define EXT_EEPROM 1
 //#define ADDR_Ax 0b000 //A2, A1, A0
@@ -292,7 +295,7 @@ void writeEeprom(u8 address, u8 data){
     Wire.write(address);
     Wire.write(data);
     Wire.endTransmission();
-    delay(1);
+    delay(10);
   }
   else if(!EXT_EEPROM){
   EEPROM.write(address, data);
@@ -514,18 +517,23 @@ void ledRgbW(u8 ledR, u8 ledG, u8 ledB, u32 waitTime){
 
 /////////////////////  Led Color  ////////////////////////////
 void ledRed(){
+  ledRgbOff();
+  delay(1);
   ledRgb(250, 0, 0); // Red
 }
 
 void ledGreen(){
+  ledRgbOff();
   ledRgb(0, 250, 0); // Green
 }
 
 void ledBlue(){
+  ledRgbOff();
   ledRgb(0, 0, 250); // Blue
 }
 
 void ledMagenta(){
+  ledRgbOff();
   ledRgb(75, 0, 230); // Magenta
 }
 ///////////////////// All Red Off ////////////////////////////
