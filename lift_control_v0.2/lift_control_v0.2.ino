@@ -49,6 +49,7 @@ typedef uint64_t u64;
 #define BUZZER_PIN 8
 /*---------------------------------------------------------------*/
 #define RELAY_PIN 7
+#define ACIK_SURE 7
 /*---------------------------------------------------------------*/
 /*RFID Reader Rc522 modules pins
  * RST  PIN  9
@@ -75,9 +76,12 @@ byte readCard[4];   // Stores scanned ID read from RFID Module
 byte lastReadCard[4]; //Store previous scanned ID read from RFID Module
 byte masterCard[4]={183, 70, 146, 53}; // Stores master card's ID read from EEPROM
 //mastercard UID: B7 46 92 35 - 183 70 146 53
+
 /*---------------------------------------------------------------*/
 bool BUZZER_UP = true;
 bool programMode = false;  // initialize programming mode to programMode
+u32 progModeBeginTime = 0;
+u16 maxProgModeTime = 10;
 bool eraseMode = false;    // initialize programming mode to erase mode
 /*---------------------------------------------------------------*/
 void setup() {
@@ -88,7 +92,8 @@ void setup() {
   Serial.begin(9600);
   SPI.begin(); // Init SPI bus
   rfid.PCD_Init(); // Init MFRC522
-  Serial.println("Asansor Kat Kontrol v0.3");
+  Serial.println("Asansor Kat Kontrol v0.3.2");
+  buzzerBip(2,250);
   ShowReaderDetails();
   /*WipeMode not necessary now*/
   /*Mastercard not store eeprom now, hardcoded in program */
@@ -98,12 +103,14 @@ void setup() {
     //masterCard[i] = readEeprom(2 + i);    // Write it to masterCard[]
     Serial.print(masterCard[i], HEX);
   }
+  buzzerBip(1,500);
   /*End of init sequence*/
   Serial.println("");
   Serial.println(F("-------------------"));
   Serial.println(F("Her sey Hazir!"));
   Serial.println(F("RFID kartin okutulmasi bekleniliyor."));
   Serial.println(F("-----------------------------"));
+  buzzerBip(3,250);
   lastReadTime = 0;
 }
 
@@ -112,8 +119,16 @@ void loop() {
     successRead = getID();  // sets successRead to 1 when we get read from reader otherwise 0
     if (programMode) {
       ledMagenta();              // Program Mode light Magenta waiting to read a new card
+      if((millis() - progModeBeginTime) > (maxProgModeTime * 1000)){
+        programMode = false;
+        Serial.println(F("Program Mode suresi bitti, cikiliyor!"));
+        buzzerBip(5,300);
+        Serial.println(F("-----------------------------"));
+        Serial.println(F("RFID kartin okutulmasi bekleniliyor."));
+        
+      }
     }
-    else {
+    if(!programMode) {
       idleMode();     // Normal mode, blue Power LED is on, all others are off
     }
   }
@@ -128,6 +143,7 @@ void loop() {
       //eraseMode = true;
       programMode = false;
       Serial.println(F("Program moddan cikiliyor!"));
+      buzzerBip(3,300);
       return;
      }
      /*Bu bölumde eraseMode surekli false olacagından silme moduna hic girmeyecek
@@ -165,9 +181,10 @@ void loop() {
         buzzerOff();
       }
       else{
-        Serial.println(F("This PICC UID not exist, registering..."));
+        //Serial.println(F("This PICC UID not exist, registering..."));
+        Serial.println(F("Bu PICC UID mevcut degil, kaydediliyor..."));
         writeID(readCard);
-        Serial.println(F("Kart basariyla kaydedildi."));
+        //Serial.println(F("Kart basariyla kaydedildi."));
         buzzerOn();
         ledRgbW(0,150,0,500);
         buzzerOff();
@@ -182,6 +199,7 @@ void loop() {
   else {
     if ( isMaster(readCard)) {    // If scanned card's ID matches Master Card's ID - enter program mode
       programMode = true;
+      progModeBeginTime=millis();
       Serial.println(F("Masterkart okutuldu - Program Modu aktif"));
       u8 count = readEeprom(0);   // Read the first Byte of EEPROM that
       Serial.print(F("Hafizada kayitli "));     // stores the number of ID's in EEPROM
@@ -331,16 +349,29 @@ void readID( u8 number ) {
 
 ///////////////////////////////////////// Add ID to EEPROM   ///////////////////////////////////
 void writeID( byte a[] ) {
+  byte isWrited[4];
   if ( !findID( a ) ) {     // Before we write to the EEPROM, check to see if we have seen this card before!
     u8 num = readEeprom(0);     // Get the numer of used spaces, position 0 stores the number of ID cards
     u8 start = ( num * 4 ) + 12;  // Figure out where the next slot starts - ilk 12 adres kart sayısı için rezerve edilmiştir.
-    num++;                // Increment the counter by one
-    writeEeprom( 0, num );     // Write the new count to the counter
+    
     for ( u8 j = 0; j < 4; j++ ) {   // Loop 4 times
       writeEeprom( start + j, a[j] );  // Write the array values to EEPROM in the right position
     }
+    for ( u8 k = 0; k < 4; k++ ) {     // Loop 4 times to get the 4 Bytes
+      isWrited[k] = readEeprom(start + k);   // Assign values read from EEPROM to array
+    }
+    if(checkTwo(a, isWrited)){
+      num++;                // Increment the counter by one            //burası sona inecek
+      writeEeprom( 0, num );     // Write the new count to the counter //burasıda onaylandıktan sonra artacak
+      Serial.print(F("Kayit Basarili. Toplam Kayitli kart adedi: "));
+      Serial.println(num);
+    }
+    else{
+      Serial.println(F("Kayit Basarisis"));
+    }
+  
     //successWrite();
-    Serial.println(F("Succesfully added ID record to EEPROM"));
+    //Serial.println(F("Succesfully added ID record to EEPROM"));
   }
   else {
     //failedWrite();
@@ -546,10 +577,12 @@ void cycleLed(u16 interval){
   u32 startTime = millis();
   do{
     if(millis()-startTime < 10){
-      ledRgb(0, 255, 0); // Green 
+      ledRgb(0, 255, 0); // Green
+      buzzerOn(); 
     }
     else if(millis()-startTime >( interval/2)-10 && millis()-startTime < (interval/2)+10){
       ledRgb(255, 0, 0); // Red
+      buzzerOff();
     }
   }
   while(millis()-startTime < interval);
@@ -574,6 +607,21 @@ bool buzzerState(){
     return true;
    }
    return false;                                                                                                                                                                                                                                                                                                                                                                                                           
+}
+void buzzerBip(u8 bipNumber, u16 bipTime){
+  for(int i=0; i<bipNumber; i++){
+    u32 startTime = millis();  
+    do{
+      if(millis()-startTime < 10){
+        buzzerOn(); 
+      }
+      else if(millis()-startTime >( bipTime/2)-10 && millis()-startTime < (bipTime/2)+10){
+        buzzerOff();
+      }
+    }
+    while(millis() - startTime < bipTime);
+    
+  }
 }
 /////////////////////  Init Relay   /////////////////////////////
 void initRelay(){
